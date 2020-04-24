@@ -51,16 +51,16 @@ class CModal : public CSolver
 private:
 
 	//! The tolerance for Jacobi
-	double Tol_J = 1.0e-9;
+	double Tol_J;
 
 	//! The tolerance for Lanczos
-	double Tol_L = 1.0e-9;
+	double Tol_L;
 
 	//! Number of required eigenvalues *(Input)
-	int Nroot = 2;
+	int Nroot;
 
 	//! Maximum number of the restart, set 5 usually
-	int N_ite_max = 5;
+	int N_ite_max;
 
 	//! Number of itegration vectors used
 	//! Usually set to be min(2*Nroot, Nroot+8), but less than the freedom of system
@@ -77,7 +77,13 @@ private:
 public:
 
 	//! Constructor
-	CModal(CSkylineMatrix<double>* K) : CSolver(K) {};
+	CModal(CSkylineMatrix<double>* K) : CSolver(K) 
+	{
+		Tol_J = 1.0e-9;
+		Tol_L = 1.0e-9;
+		Nroot = 2;
+		N_ite_max = 5;
+	};
 
 	//! To solve the generalized eigenproblem with the Lanczos method
 	void Lanczos();
