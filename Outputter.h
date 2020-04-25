@@ -33,6 +33,8 @@ protected:
 	static COutputter* _instance;
 //! Another instance class for tecplot
 	static COutputter* tec_instance;
+//! Another instance class for VTK
+	static COutputter* vtk_instance;
 
 public:
 
@@ -43,6 +45,8 @@ public:
 	static COutputter* Instance(string FileName = " ");
 //! Return the tecplot instance of the class
 	static COutputter* Tec_Instance(string FileName = " ");
+//! Return the VTK instance of the class
+	static COutputter* vtk_Instance(string FileName = " ");
 
 //!	Output current time and date
 	void PrintTime(const struct tm * ptm, COutputter& output);
@@ -79,6 +83,29 @@ public:
 
 //! Output into tecplot
 	void OutputTecplot(int step);
+
+//! Output into vtk files for paraview
+	void OutputVTK();
+
+//! Output head into vtk files
+	void OutputVTKHead();
+
+//! Output node information into vtk files
+	void OutputVTKNodes();
+
+//! Output element information into vtk files
+	void OutputVTKElements();
+
+//! Output nodal displacement into vtk files
+	void OutputVTKNodalDis();
+
+//! Output element stress and force into vtk files
+	void OutputVTKElemStress();
+
+//! Overload OututVTK()&Nodaldis&ElemStress for dynamic problem
+	void OutputVTK(double time,double* dis);
+	void OutputVTKNodalDis(double time, double* dis);
+	void OutputVTKElemStress(double time, double* dis);
 
 //! Overload the operator <<
 	template <typename T>

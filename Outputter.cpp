@@ -35,6 +35,7 @@ void COutputter::PrintTime(const struct tm* ptm, COutputter &output)
 
 COutputter* COutputter::_instance = nullptr;
 COutputter* COutputter::tec_instance = nullptr;
+COutputter* COutputter::vtk_instance = nullptr;
 
 //	Constructor
 COutputter::COutputter(string FileName)
@@ -61,6 +62,12 @@ COutputter* COutputter::Tec_Instance(string FileName)
 	if (!tec_instance)
 		tec_instance = new COutputter(FileName);
 	return tec_instance;
+}
+COutputter* COutputter::vtk_Instance(string FileName)
+{
+	if(!vtk_instance)
+		vtk_instance = new COutputter(FileName);
+	return vtk_instance;
 }
 
 //	Print program logo
@@ -457,6 +464,294 @@ void COutputter::OutputTecplot(int step)
 			OutputFile << endl;
 		}
 	}
+}
+
+void COutputter::OutputVTK()//need a reload (double time,double* dis)
+{
+	OutputVTKNodalDis();
+	OutputVTKElemStress();
+}
+
+void COutputter::OutputVTK(double time, double* dis)
+{
+	OutputVTKNodalDis(time, dis);
+	OutputVTKElemStress(time, dis);
+}
+
+void COutputter::OutputVTKNodalDis(double time, double* dis)
+{
+	CDomain* FEMData = CDomain::Instance();
+	CNode* NodeList = FEMData->GetNodeList();
+	unsigned int NUMNP = FEMData->GetNUMNP();
+
+//	allocat a matrix: nodepoint*3 
+	double **Dis = new double *[NUMNP];
+	for ( int i = 0; i< NUMNP; i++)
+		Dis[i]= new double [3];
+	int count = 0 ;
+
+	for ( int i =0; i < NUMNP; i++)
+	{
+		for ( int j = 0; j < 3; j++)
+		{
+			if( NodeList[i].bcode[j] == 0 )
+				Dis[i][j] = 0;
+			else
+			{
+				Dis[i][j] = dis[count];
+				count++;
+			}
+		}
+	}
+
+	OutputFile << "POINT_DATA" << setw(8) << NUMNP << endl;
+	OutputFile << setiosflags(ios::left);
+	OutputFile << "VECTORS DISPLACEMENT_" << setw(8) << time <<" double" << endl;
+	OutputFile << setiosflags(ios::right) << setiosflags(ios::scientific);
+	for (unsigned int np = 0; np < NUMNP; np++)
+		OutputFile << setw(8) << Dis[np][0] << "    " << setw(8) << Dis[np][1] << "    " << setw(8) << Dis[np][2] << endl;
+	OutputFile << endl;
+	//delete Dis
+	for (int i = 0; i < NUMNP; i++)
+		delete []Dis[i];
+	delete []Dis;
+}
+
+void COutputter::OutputVTKElemStress(double time, double *dis)
+{
+	CDomain* FEMData = CDomain::Instance();
+
+	unsigned int NUMEG = FEMData->GetNUMEG();
+	int NUMEALL = 0;
+	for (unsigned int EleGrpIndex = 0; EleGrpIndex < NUMEG; EleGrpIndex++)
+	{
+		CElementGroup& EleGrp = FEMData->GetEleGrpList()[EleGrpIndex];
+		NUMEALL +=EleGrp.GetNUME();
+	}
+// new stress matrix, number of elments*2,column[0] for stress and column[1] for force
+	double** stress = new double*[NUMEALL];
+	for (int i = 0; i < NUMEALL; i++)
+		stress[i] = new double [2];
+	int count = 0;
+	
+
+	for (unsigned int EleGrpIndex = 0; EleGrpIndex < NUMEG; EleGrpIndex++)
+	{
+		CElementGroup& EleGrp = FEMData->GetEleGrpList()[EleGrpIndex];
+		unsigned int NUME = EleGrp.GetNUME();
+		ElementTypes ElementType = EleGrp.GetElementType();
+		unsigned int NG = EleGrp.GetNG();
+		
+		for (unsigned int Ele = 0; Ele < NUME; Ele++)
+		{
+			CElement& Element = EleGrp[Ele];
+			Element.ElementStress(&stress[count][0], dis);
+			CBarMaterial& material = *dynamic_cast<CBarMaterial*>(Element.GetElementMaterial());
+			stress[count][1] = stress[count][0] * material.Area;
+			count++;
+		}
+	}
+// Output element stress
+	OutputFile << "CELL_DATA " << setw(8) << NUMEALL << endl;
+	OutputFile << setiosflags(ios::left); 
+	OutputFile << "SCALARS " << "Stress" << setw(8) << time << " double " << "1" << endl;
+	OutputFile << "LOOKUPTABLE " << "Element_Stress" << setw(8) << time << endl;
+	OutputFile << setiosflags(ios::right) << setiosflags(ios::scientific);
+	for (int i = 0; i < NUMEALL; i++)
+		OutputFile << setw(8) << stress[i][0] << endl;
+	OutputFile << endl;
+
+// Output element force
+	OutputFile << setiosflags(ios::left); 
+	OutputFile << "SCALARS " << "Force" << setw(8) << time << " double " << "1" << endl;
+	OutputFile << "LOOKUPTABLE " << "Element_Force" << setw(8) << time << endl;
+	OutputFile << setiosflags(ios::right) << setiosflags(ios::scientific);
+	for (int i = 0; i < NUMEALL; i++)
+		OutputFile << setw(8) << stress[i][1] << endl;
+	OutputFile << endl;
+	//delete stress
+	for (int i = 0; i < NUMEALL; i++)
+		delete []stress[i];
+	delete []stress;
+}
+
+void COutputter::OutputVTKHead()
+{
+	CDomain* FEMData = CDomain::Instance();
+	OutputFile << "# vtk DataFile Version 3.0" <<endl;
+	OutputFile << "\"" << FEMData->GetTitle() << "\"" << endl;
+	OutputFile << "ASCII" << endl;
+	OutputFile << "DATASET UNSTRUCTURED_GRID" << endl
+			   << endl;
+}
+
+void COutputter::OutputVTKNodes()
+{
+	CDomain* FEMData = CDomain::Instance();
+	CNode* NodeList = FEMData->GetNodeList();
+	unsigned int NUMNP = FEMData->GetNUMNP();
+
+	OutputFile << "POINTS" << setw(8) << NUMNP << " double" << endl;
+	OutputFile << setiosflags(ios::right) << setiosflags(ios::scientific);
+	for (unsigned int np = 0; np < NUMNP; np++)
+		OutputFile << NodeList[np].XYZ[0] << " " << setw(8) << NodeList[np].XYZ[1] << " " << setw(8) << NodeList[np].XYZ[2] << endl;
+}
+
+void COutputter::OutputVTKElements()
+{
+	CDomain* FEMData = CDomain::Instance();
+	unsigned int NUMEG = FEMData->GetNUMEG();
+	int NUMEALL = 0;//numbers of all types of element
+	int nlist = 0;	//nlist for vtk file
+	int **ElemInfo = new int *[NUMEG];//allocate a matrix: elment type* nums of this type
+	for ( int i = 0; i< NUMEG; i++)
+		ElemInfo[i]= new int [2];
+	for (unsigned int EleGrp = 0; EleGrp < NUMEG; EleGrp++)
+	{
+		ElementTypes ElementType = FEMData->GetEleGrpList()[EleGrp].GetElementType();
+		unsigned int NUME = FEMData->GetEleGrpList()[EleGrp].GetNUME();
+		ElemInfo[EleGrp][1] = NUME;
+		NUMEALL += NUME;
+		switch (ElementType)
+		{
+			case ElementTypes::Bar: // Bar element
+				ElemInfo[EleGrp][0] = 3;
+				nlist += 3*NUME;
+				break;
+			case ElementTypes::Q4: // Q4 element
+				ElemInfo[EleGrp][0] = 9;
+				nlist += 5*NUME;
+				break;
+//			case ElementTypes::NewType // NewType 
+//				ElemInfo[EleGrp][0] = 23;
+//				nlist += 9*NUME;
+//				break;
+		}
+	}
+	OutputFile << "CELLS" << setw(8) << NUMEALL << setw(8) << nlist << endl;
+	//write cell info
+	for (unsigned int EleGrpIndex = 0; EleGrpIndex < NUMEG; EleGrpIndex++) {
+		CElementGroup& EleGrp = FEMData->GetEleGrpList()[EleGrpIndex];
+		unsigned int NUME = FEMData->GetEleGrpList()[EleGrpIndex].GetNUME();
+		int Num_Node = EleGrp[0].GetNN();
+		for (unsigned int Ele = 0; Ele < NUME; Ele++)
+		{
+			OutputFile << Num_Node;
+			for (int N_n = 0; N_n < Num_Node; N_n++)
+			{
+				OutputFile << setw(8) << EleGrp[Ele].GetNodes()[N_n]->NodeNumber-1;
+			}
+			OutputFile << endl;
+		}
+	}
+	OutputFile << "CELL_TYPES" << setw(8) << NUMEALL << endl;
+	//write cell_type
+	for (int i = 0; i < NUMEG; i++) {
+		for (int j =0 ; j< ElemInfo[i][1]; j++){
+			OutputFile << ElemInfo[i][0] << endl;
+		}
+	}
+	//delete ElemInfo
+	for (int i = 0; i < NUMEG; i++)
+		delete []ElemInfo[i];
+	delete []ElemInfo;
+}
+
+void COutputter::OutputVTKNodalDis()
+{
+	CDomain* FEMData = CDomain::Instance();
+	CNode* NodeList = FEMData->GetNodeList();
+	double* Displacement = FEMData->GetDisplacement();
+	unsigned int NUMNP = FEMData->GetNUMNP();
+
+//	allocat a matrix: nodepoint*3 
+	double **Dis = new double *[NUMNP];
+	for ( int i = 0; i< NUMNP; i++)
+		Dis[i]= new double [3];
+	int count = 0 ;
+
+	for ( int i =0; i < NUMNP; i++)
+	{
+		for ( int j = 0; j < 3; j++)
+		{
+			if( NodeList[i].bcode[j] == 0 )
+				Dis[i][j] = 0;
+			else
+			{
+				Dis[i][j] = Displacement[count];
+				count++;
+			}
+		}
+	}
+
+	OutputFile << "POINT_DATA" << setw(8) << NUMNP << endl;
+	OutputFile << "VECTORS DISPLACEMENT double" << endl;
+	OutputFile << setiosflags(ios::right) << setiosflags(ios::scientific);
+	for (unsigned int np = 0; np < NUMNP; np++)
+		OutputFile << setw(8) << Dis[np][0] << "    " << setw(8) << Dis[np][1] << "    " << setw(8) << Dis[np][2] << endl;
+	OutputFile << endl;
+	//delete Dis
+	for (int i = 0; i < NUMNP; i++)
+		delete []Dis[i];
+	delete []Dis;
+}
+
+void COutputter::OutputVTKElemStress()
+{
+	CDomain* FEMData = CDomain::Instance();
+
+	double* Displacement = FEMData->GetDisplacement();
+
+	unsigned int NUMEG = FEMData->GetNUMEG();
+	int NUMEALL = 0;
+	for (unsigned int EleGrpIndex = 0; EleGrpIndex < NUMEG; EleGrpIndex++)
+	{
+		CElementGroup& EleGrp = FEMData->GetEleGrpList()[EleGrpIndex];
+		NUMEALL +=EleGrp.GetNUME();
+	}
+// new stress matrix, number of elments*2,column[0] for stress and column[1] for force
+	double** stress = new double*[NUMEALL];
+	for (int i = 0; i < NUMEALL; i++)
+		stress[i] = new double [2];
+	int count = 0;
+	
+
+	for (unsigned int EleGrpIndex = 0; EleGrpIndex < NUMEG; EleGrpIndex++)
+	{
+		CElementGroup& EleGrp = FEMData->GetEleGrpList()[EleGrpIndex];
+		unsigned int NUME = EleGrp.GetNUME();
+		ElementTypes ElementType = EleGrp.GetElementType();
+		unsigned int NG = EleGrp.GetNG();
+		
+		for (unsigned int Ele = 0; Ele < NUME; Ele++)
+		{
+			CElement& Element = EleGrp[Ele];
+			Element.ElementStress(&stress[count][0], Displacement);
+			CBarMaterial& material = *dynamic_cast<CBarMaterial*>(Element.GetElementMaterial());
+			stress[count][1] = stress[count][0] * material.Area;
+			count++;
+		}
+	}
+// Output element stress
+	OutputFile << "CELL_DATA " << setw(8) << NUMEALL << endl;
+	OutputFile << "SCALARS " << "Stress " << "double " << "1" << endl;
+	OutputFile << "LOOKUP_TABLE " << "Element_Stress" << endl;
+	OutputFile << setiosflags(ios::right) << setiosflags(ios::scientific);
+	for (int i = 0; i < NUMEALL; i++)
+		OutputFile << setw(8) << stress[i][0] << endl;
+	OutputFile << endl;
+
+// Output element force
+	OutputFile << "SCALARS " << "Force " << "double " << "1" << endl;
+	OutputFile << "LOOKUP_TABLE " << "Element_Force" << endl;
+	OutputFile << setiosflags(ios::right) << setiosflags(ios::scientific);
+	for (int i = 0; i < NUMEALL; i++)
+		OutputFile << setw(8) << stress[i][1] << endl;
+	OutputFile << endl;
+	//delete stress
+	for (int i = 0; i < NUMEALL; i++)
+		delete []stress[i];
+	delete []stress;
 }
 
 #ifdef _DEBUG_
